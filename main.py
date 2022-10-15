@@ -7,6 +7,7 @@ from dateutil import tz
 
 from flask import Flask, request
 from flask import render_template
+import folium
 
 
 app = Flask(__name__)
@@ -27,12 +28,15 @@ def main():
 
 
 def convert_location_to_coords(loc):
-    api_url = f'https://nominatim.openstreetmap.org/search?q={loc.replace(" ", "+")}&format=geojson&countrycodes=PH'
-    response = requests.get(api_url)
-    data = response.json()
-    lon = data['features'][0]['geometry']['coordinates'][0]
-    lat = data['features'][0]['geometry']['coordinates'][1]
-    return lat, lon
+    api_url_polygon = f'https://nominatim.openstreetmap.org/search?q={loc.replace(" ", "+")}&format=geojson&countrycodes=PH&polygon_geojson=1'
+    api_url_point = f'https://nominatim.openstreetmap.org/search?q={loc.replace(" ", "+")}&format=geojson&countrycodes=PH'
+    response_polygon, response_point = requests.get(api_url_polygon), requests.get(api_url_point)
+    data_polygon, data_point = response_polygon.json(), response_point.json()
+    lon = data_point['features'][0]['geometry']['coordinates'][0]
+    lat = data_point['features'][0]['geometry']['coordinates'][1]
+    polygon = data_polygon['features'][0]['geometry']['coordinates'][0]
+    polygon_nodes = [(node[1], node[0]) for node in polygon]
+    return lat, lon, polygon_nodes
 
 
 def convert_utc_to_local_time(sunrise, sunset):
@@ -59,20 +63,31 @@ def convert_utc_to_local_time(sunrise, sunset):
     return local_time_sr, local_time_ss
 
 
+@app.route('/map')
+def render_map():
+    return render_template('map.html')
+
+
 @app.route('/times', methods=['POST'])
-def get_the_time_data():
+def display_results():
     if request.method == 'POST':
         location = request.form['location']
-        lat, lon = convert_location_to_coords(location)
+        lat, lon, polygon = convert_location_to_coords(location)
+        # create map for selected location
+        map = folium.Map(location=[lat, lon],
+                         tiles="cartodbpositron")
+        # draw polygon based on administrative boundaries
+        folium.Polygon(polygon, tooltip=f'''{location}''',
+                         stroke=False, fill_color="green", fill_opacity=0.1).add_to(map)
+        map.fit_bounds(map.get_bounds(), padding=(15, 15))
+        map.save('templates/map.html')
         sun_api = f'https://api.sunrise-sunset.org/json?lat={lat}&lng={lon}&date=today&formatted=0'
         response = requests.get(sun_api)
         data = response.json()
-        sunrise_utc = data['results']['sunrise']
-        sunset_utc = data['results']['sunset']
+        sunrise_utc, sunset_utc = data['results']['sunrise'], data['results']['sunset']
         local_sr, local_ss = convert_utc_to_local_time(sunrise_utc, sunset_utc)
         return render_template('result.html', sunrise=local_sr, sunset=local_ss, location=location)
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), threaded=True)
-
+    app.run(debug=True, host = "0.0.0.0", port = int(os.environ.get("PORT", 8080)), threaded=True)
