@@ -5,9 +5,9 @@ from datetime import datetime
 import requests
 from dateutil import tz
 
+import folium
 from flask import Flask, request
 from flask import render_template
-import folium
 
 
 app = Flask(__name__)
@@ -63,15 +63,16 @@ def convert_utc_to_local_time(sunrise, sunset):
     return local_time_sr, local_time_ss
 
 
-@app.route('/map')
-def render_map():
-    return render_template('map.html')
+@app.route('/map/<loc_name>')
+def render_map(loc_name):
+    return render_template(f'map_{loc_name}.html')
 
 
 @app.route('/times', methods=['POST'])
 def display_results():
     if request.method == 'POST':
         location = request.form['location']
+        location_clean = location.replace(' ', '').replace('()', '').lower()
         lat, lon, polygon = convert_location_to_coords(location)
         # create map for selected location
         map = folium.Map(location=[lat, lon],
@@ -80,14 +81,15 @@ def display_results():
         folium.Polygon(polygon, tooltip=f'''{location}''',
                          stroke=False, fill_color="green", fill_opacity=0.1).add_to(map)
         map.fit_bounds(map.get_bounds(), padding=(15, 15))
-        map.save('templates/map.html')
+        map.save(f'templates/map_{location_clean}.html')
         sun_api = f'https://api.sunrise-sunset.org/json?lat={lat}&lng={lon}&date=today&formatted=0'
         response = requests.get(sun_api)
         data = response.json()
         sunrise_utc, sunset_utc = data['results']['sunrise'], data['results']['sunset']
         local_sr, local_ss = convert_utc_to_local_time(sunrise_utc, sunset_utc)
-        return render_template('result.html', sunrise=local_sr, sunset=local_ss, location=location)
+        return render_template('result.html', sunrise=local_sr, sunset=local_ss, location=location, map_name=location_clean)
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host = "0.0.0.0", port = int(os.environ.get("PORT", 8080)), threaded=True)
+    app.run(debug=True, threaded=True)
+    # host = "0.0.0.0", port = int(os.environ.get("PORT", 8080)),
